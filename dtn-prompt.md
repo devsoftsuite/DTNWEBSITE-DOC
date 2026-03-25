@@ -89,3 +89,33 @@ ALTER TABLE content_article_info ENGINE=InnoDB;
 ผลการตรวจสอบหลังแก้ไข
 - ตรวจสอบ Processlist หลังดำเนินการเปลี่ยน Engine ของตาราง content_article_info แล้ว พบว่าไม่มี Query ค้างหรืออยู่ในสถานะรอ Table Lock
 ```
+
+```
+ปัญหา
+- เว็บไซต์ dtn.go.th แสดง Cloudflare Error 8 "The proxy failed to connect to the web server, due to TCP connection rejection (TCP Reset)" โดยเกิดขึ้นซ้ำหลายครั้งต่อวันตั้งแต่วันที่ 22-25 มีนาคม 2026
+
+สาเหตุ
+- ionCube PHP Loader เวอร์ชัน 10.4.5 เกิด Segmentation Fault (signal 11) บน Apache child process ทำให้ process นั้นหยุดทำงานกะทันหัน Cloudflare จึงไม่สามารถเชื่อมต่อมายัง server ได้และแสดง Error 8 แทน
+
+ขั้นตอนการตรวจสอบ
+1. ตรวจสอบ Apache error log ด้วยคำสั่ง grep "Mar 24" /var/log/httpd/error_log พบข้อความ "child pid XXXXX exit signal Segmentation fault (11)" เกิดขึ้น 3 ครั้งในวันที่ 24 มีนาคม และรวมทั้งสิ้น 12 ครั้งระหว่างวันที่ 22-25 มีนาคม
+2. ตรวจสอบ PHP extension ด้วยคำสั่ง php -v พบว่าติดตั้ง ionCube PHP Loader + ionCube24 v10.4.5
+3. ตรวจสอบไฟล์ PHP บนเว็บไซต์ พบว่ามีการใช้ ionCube encoded files จริง เช่น Slideshow.php, Contenttag.php, MenuData.php และอื่นๆ ใน applicationfront/views/helpers/
+4. ตรวจสอบทรัพยากรระบบ พบว่า Memory และ CPU อยู่ในระดับปกติ (RAM ใช้ 1.5G จาก 15G, Load average 0.38) จึงตัดสาเหตุจาก resource หมดออกได้
+
+วิธีการแก้ไข
+1. Backup ionCube เดิมไว้ก่อนด้วยคำสั่ง
+cp /usr/lib64/php/modules/ioncube_loader_lin_7.3.so /usr/lib64/php/modules/ioncube_loader_lin_7.3.so.bak.v10
+2. Download ionCube Loader เวอร์ชันล่าสุดสำหรับ Linux x86-64
+cd /tmp && curl -O https://downloads.ioncube.com/loader_downloads/ioncube_loaders_lin_x86-64.tar.gz
+tar -xzf ioncube_loaders_lin_x86-64.tar.gz
+3. Copy ไฟล์ใหม่เข้าแทนที่ (ใช้ \cp เพื่อ bypass alias cp='cp -i' ของ CentOS)
+\cp -f /tmp/ioncube/ioncube_loader_lin_7.3.so /usr/lib64/php/modules/ioncube_loader_lin_7.3.so
+4. Restart Apache เพื่อโหลด ionCube เวอร์ชันใหม่
+systemctl restart httpd
+
+ผลการตรวจสอบหลังแก้ไข
+- ionCube PHP Loader อัปเกรดจาก v10.4.5 เป็น v15.5.0 สำเร็จ (ตรวจสอบด้วย php -v)
+- Apache restart สำเร็จและกลับมาทำงานปกติ (active running) ตั้งแต่เวลา 13:26:01 น.
+- ต้องติดตาม error_log ต่อ เพื่อยืนยันว่า Segmentation Fault ไม่เกิดซ้ำอีก
+```
